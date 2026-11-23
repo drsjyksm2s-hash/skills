@@ -332,7 +332,7 @@ function showStop(key) {
 function renderPlan(day) {
   const list = node('ol',day ? 'stops' : 'all-days');
   get('day-title').textContent = day ? day[1] : 'План поездки';
-  get('day-subtitle').textContent = day ? longDate(day[0]) + ' · время местное' : 'Выберите дату, чтобы открыть план дня.';
+  get('day-subtitle').textContent = day ? longDate(day[0]) + ' · местное время · ≈ ориентировочное начало' : 'Выберите дату, чтобы открыть план дня.';
   if (day) {
     day[2].forEach(([key,time,note,status,custom],index) => {
       const li = node('li');
@@ -344,7 +344,7 @@ function renderPlan(day) {
       }
       const heading = node('span','stop-title');
       heading.append(node('span','order',String(index+1)),node('span','',custom || places[key][0]));
-      if (time) heading.append(node('span','time',time));
+      if (time) heading.prepend(node('span','time',time));
       if (status) heading.append(node('span','status',status));
       item.append(heading,node('span','note',note));
       li.append(item);
@@ -370,7 +370,7 @@ function selectDay(date, moving=false) {
   pins.clearLayers();
   markers.clear();
   const day = byDate.get(date);
-  if(day)day[2]=suggested(day);
+  if(day)day[2]=hourlyPlan(day);
   if(!moving)controls(date);
   updateCount(day);
   const grouped = new Map();
@@ -511,6 +511,36 @@ function updateCount(day){
  warning.hidden=extra.length<=limit;
  warning.textContent=warning.hidden?'':'Слишком много остановок для этого дня. '+(limit?'Ориентир — до '+limit+' дополнительных.':'На пересадке время на выход в город нужно проверить после контроля.')+' Уменьшите ползунки.';
 }
+function hourlyPlan(day){
+ const stops=suggested(day).map(stop=>stop.slice());
+ if(!stops.length)stops.push([null,'','Свободный день. Добавьте варианты ползунками.','','Свободное время']);
+ const explicit=label=>{
+   const match=label.match(/(\d{2}):(\d{2})/);
+   return match?Number(match[1])*60+Number(match[2]):null;
+ };
+ let cursor=600;
+ for(let i=0;i<stops.length;i++){
+   const stop=stops[i], label=stop[1]||'', fixed=explicit(label);
+   if(fixed!==null){cursor=fixed+60;continue;}
+   const later=stops.slice(i+1).findIndex(s=>explicit(s[1]||'')!==null);
+   let minute=cursor;
+   if(/вечером|на закате/i.test(label))minute=Math.max(minute,17*60);
+   if(/ужин/i.test(label))minute=Math.max(minute,18*60);
+   if(/ночью/i.test(label))minute=Math.max(minute,20*60);
+   if(later>=0){
+     const end=explicit(stops[i+later+1][1]);
+     const previous=i?explicit(stops[i-1][1]||''):null;
+     const floor=previous===null?Math.min(cursor,end):previous;
+     const step=Math.max(1,Math.floor((end-floor)/(later+2)/5)*5);
+     minute=Math.min(minute,end-(later+1)*step);
+     if(previous!==null)minute=Math.max(previous+step,minute);
+   }
+   stop[1]='≈ '+String(Math.floor(minute/60)%24).padStart(2,'0')+':'+String(minute%60).padStart(2,'0');
+   cursor=minute+(['merlion','jubilee','esplanade','helix'].includes(stop[0])?20:60);
+ }
+ return stops;
+}
+
 function controls(date){
  panel.hidden=!date;
  if(!date)return;
