@@ -18,7 +18,7 @@ nav{display:flex;gap:7px;overflow:auto;padding:4px 4px 10px;margin:0 -4px 11px;s
 @media(max-width:760px){header{display:block;margin-bottom:13px}.overview{margin-top:12px}.layout{grid-template-columns:minmax(0,1fr);gap:12px}#map{height:clamp(280px,49vh,470px)}.card{padding:13px}.routes-card{margin-top:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
-<style>#plan{margin-top:12px}.card label{display:block;margin:8px 0}.card input[type=range]{width:100%;display:block;accent-color:#155e51}.card details{margin-top:12px}</style></head>
+<style>#plan{margin-top:12px}.card label{display:block;margin:8px 0}.card input[type=range]{width:100%;display:block;accent-color:#155e51}.card details{margin-top:12px}</style><style>@media(min-width:761px){.panel{position:sticky;top:8px}#map{height:65vh}}@media(max-width:760px){header{display:flex;align-items:center;gap:8px}h1{font-size:1.65rem}header p{font-size:.82rem}.overview{margin-top:0;white-space:normal}#map{height:52vh;min-height:300px}}</style></head>
 <body>
 <div class="wrap">
 <header><div><h1>Наш отпуск 2027</h1><p>29 декабря 2026 — 13 января 2027 · Время местное</p></div><button type="button" id="overview" class="overview" aria-pressed="true">Весь маршрут</button></header>
@@ -27,7 +27,7 @@ nav{display:flex;gap:7px;overflow:auto;padding:4px 4px 10px;margin:0 -4px 11px;s
 <div class="layout">
 <section class="panel" aria-label="Карта маршрута">
 <div id="map" aria-label="Интерактивная карта с остановками"></div>
-<div class="mapbar"><button type="button" id="fit">Показать все точки</button><button type="button" id="focusWalk" hidden>Приблизить прогулку</button><button type="button" id="tiles" aria-pressed="false">Улицы OSM</button><small id="tileState" aria-live="polite">Схема доступна без интернета. Слой улиц загружается отдельно.</small></div>
+<div class="mapbar"><button type="button" id="fit">Показать все точки</button><button type="button" id="focusWalk" hidden>Приблизить прогулку</button><button type="button" id="tiles" aria-pressed="false">Карта улиц</button><small id="tileState" aria-live="polite">Схема доступна без интернета. Слой улиц загружается отдельно.</small></div>
 <div class="legend" aria-label="Обозначения"><span><i class="line flight"></i>Перелёт</span><span><i class="line land"></i>Наземный переезд</span><span><i class="line ferry"></i>Паром</span><span><i class="line walk"></i>Пешком</span><span>Пунктирная метка — вариант</span></div>
 </section>
 <div>
@@ -211,6 +211,7 @@ function link(title, href) {
 function activateTiles() {
   const shown = !map.hasLayer(streets);
   get('tiles').setAttribute('aria-pressed', String(shown));
+  get('tiles').textContent = shown ? 'Перейти к схеме' : 'Показать улицы';
   if (shown) {
     map.removeLayer(outline);
     streets.addTo(map);
@@ -222,12 +223,13 @@ function activateTiles() {
   }
 }
 streets.on('load', () => {
-  if (map.hasLayer(streets)) get('tileState').textContent = 'Слой улиц OpenStreetMap включён.';
-});
-streets.on('tileerror', () => {
-  if (!map.hasLayer(streets)) return;
-  activateTiles();
-  get('tileState').textContent = 'Слой улиц не загрузился. Показана схема.';
+ if (!map.hasLayer(streets)) return;
+ const loaded = streets.getContainer()?.querySelector('.leaflet-tile-loaded');
+ if (loaded) get('tileState').textContent = 'Карта улиц · OpenStreetMap';
+ else {
+   activateTiles();
+   get('tileState').textContent = 'Улицы недоступны. Можно повторить загрузку кнопкой «Показать улицы».';
+ }
 });
 function fit(bounds, maxZoom=15) {
   if (bounds?.isValid()) map.fitBounds(bounds,{padding:[35,38],maxZoom,animate:false});
@@ -322,7 +324,8 @@ function showStop(key) {
   if (marker) {
     const point = marker.getLatLng();
     if (!map.getBounds().pad(-.15).contains(point)) map.panTo(point,{animate:false});
-    marker.openPopup();
+    if(map.getZoom()<14) map.setView(point,14,{animate:false});
+    (markers.get(key)||marker).openPopup();
     if (matchMedia('(max-width:760px)').matches) get('map').scrollIntoView({block:'start'});
   }
 }
@@ -406,7 +409,7 @@ function selectDay(date, moving=false) {
    if(variant.length>1)polyline(['01-09','01-10','01-11','01-13'].includes(short(date))?'walk':'land',variant.map(coord),true,'Предложенный участок');
   }
   currentBounds = L.latLngBounds(plotted);
-  fit(currentBounds);
+  if(!moving) fit(currentWalk && ['2027-01-09','2027-01-10','2027-01-11'].includes(date) ? currentWalk : currentBounds);
   renderPins();
   get('focusWalk').hidden = !day || !walks.some(([walkDate]) => walkDate===date);
   get('overview').setAttribute('aria-pressed',String(!day));
@@ -508,5 +511,6 @@ function controls(date){
 }
 
 selectDay('');
+activateTiles();
 
 </script></body></html>
