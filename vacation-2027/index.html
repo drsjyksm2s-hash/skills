@@ -18,7 +18,7 @@ nav{display:flex;gap:7px;overflow:auto;padding:4px 4px 10px;margin:0 -4px 11px;s
 @media(max-width:760px){header{display:block;margin-bottom:13px}.overview{margin-top:12px}.layout{grid-template-columns:minmax(0,1fr);gap:12px}#map{height:clamp(280px,49vh,470px)}.card{padding:13px}.routes-card{margin-top:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
-<style>#plan{margin-top:12px}.card label{display:block;margin:8px 0}.card input[type=range]{width:100%;display:block;accent-color:#155e51}.card details{margin-top:12px}</style><style>@media(min-width:761px){.panel{position:sticky;top:8px}#map{height:65vh}}@media(max-width:760px){header{display:flex;align-items:center;gap:8px}h1{font-size:1.65rem}header p{font-size:.82rem}.overview{margin-top:0;white-space:normal}#map{height:52vh;min-height:300px}}</style></head>
+<style>#plan{margin-top:12px}.card label{display:block;margin:8px 0}.card input[type=range]{width:100%;display:block;accent-color:#155e51}.card details{margin-top:12px}</style><style>@media(min-width:761px){.panel{position:sticky;top:8px}#map{height:65vh}}@media(max-width:760px){header{display:flex;align-items:center;gap:8px}h1{font-size:1.65rem}header p{font-size:.82rem}.overview{margin-top:0;white-space:normal}#map{height:52vh;min-height:300px}}</style><style>#point-warning{background:#fff1cf;color:#653b00;border-left:4px solid #ab6809;padding:10px;border-radius:5px}</style></head>
 <body>
 <div class="wrap">
 <header><div><h1>Наш отпуск 2027</h1><p>29 декабря 2026 — 13 января 2027 · Время местное</p></div><button type="button" id="overview" class="overview" aria-pressed="true">Весь маршрут</button></header>
@@ -372,6 +372,7 @@ function selectDay(date, moving=false) {
   const day = byDate.get(date);
   if(day)day[2]=suggested(day);
   if(!moving)controls(date);
+  updateCount(day);
   const grouped = new Map();
   for (const [eventDate,,stops] of day?[day]:days) {
     stops.forEach((stop,index) => {
@@ -399,13 +400,15 @@ function selectDay(date, moving=false) {
       currentWalk = L.latLngBounds(points);
     }
   }
-  const chosen=day?.[2].find(s=>s[3]==='По предпочтениям');
+  const chosen=day?.[2].find(s=>s[0]&&s[3]==='По предпочтениям');
   let variant=[];
   if(chosen?.[0]) {
    const idx=day[2].indexOf(chosen);
    const prev=day[2].slice(0,idx).reverse().find(s=>s[0]&&!s[3]&&!airports.includes(s[0]));
-   const next=day[2].slice(idx+1).find(s=>s[0]&&!s[3]&&!airports.includes(s[0]));
-   variant=[prev?.[0],chosen[0],next?.[0]].filter((k,i,a)=>k&&k!==a[i-1]);
+   const selectedStops=day[2].filter(s=>s[0]&&s[3]==='По предпочтениям');
+   const last=day[2].indexOf(selectedStops[selectedStops.length-1]);
+   const next=day[2].slice(last+1).find(s=>s[0]&&!s[3]&&!airports.includes(s[0]));
+   variant=[prev?.[0],...selectedStops.map(s=>s[0]),next?.[0]].filter((k,i,a)=>k&&k!==a[i-1]);
    if(variant.length>1)polyline(['01-09','01-10','01-11','01-13'].includes(short(date))?'walk':'land',variant.map(coord),true,'Предложенный участок');
   }
   currentBounds = L.latLngBounds(plotted);
@@ -471,34 +474,51 @@ panel.className='card';
 get('plan').before(panel);
 const short=date=>date.slice(5);
 function suggested(day){
- const date=day[0],base=originals.get(date),prefs=settings[date], pool=slots[short(date)];
- if(!pool||!prefs||!prefs.some(Number))return base;
- const score=key=>(alternatives[key]?.[5]||profiles[key]).reduce((sum,n,i)=>sum+n*prefs[i],0);
- const key=pool.slice().sort((a,b)=>score(b)-score(a))[0];
- if(score(key)===0)return base;
- const original=base.find(s=>s[0]===key||(key==='class'&&s[4]==='Кулинарный мастер-класс'));
- const entry=original?original.slice():[key,'',alternatives[key]?.[4]||notes[key]||'Остановка по вашим предпочтениям.'];
- entry[3]='По предпочтениям';
- const dateKey=short(date);
- const replacements={'12-31':['icon','one'],'01-02':['tien','samae'],'01-06':['zoo','class'],'01-09':['petronas','alor'],'01-10':['lau','china']};
- const remove=replacements[dateKey]||[];
- const first=base.findIndex(s=>remove.includes(s[0]||'class'));
- let plan=base.filter(s=>!remove.includes(s[0]||'class'));
- if(original&&plan.includes(original))return plan;
- const before={'01-01':'cab','01-07':'resort','01-11':'hawker','01-13':'wudao'};
- let position=first>=0?first:before[dateKey]?plan.findIndex(s=>s[0]===before[dateKey]):plan.length;
- if(dateKey==='01-12')position=1;
- if(dateKey==='01-13')entry[2]+=' Вариант при пересадке.';
- if(dateKey==='01-04')entry[2]+=' После возвращения из Банг Саре.';
- if(dateKey==='01-11')entry[2]+=' Короткая остановка между 11:30 и обедом в 12:30, если хватает времени.';
- plan.splice(position<0?plan.length:position,0,entry);
+ const date=day[0], base=originals.get(date), pool=slots[short(date)]||[];
+ const values=settings[date]||[0,0,0,0];
+ const keyOf=stop=>stop[0]||(stop[4]==='Кулинарный мастер-класс'?'class':null);
+ const candidates=pool.filter(key=>!base.some(stop=>keyOf(stop)===key&&!stop[3]));
+ const selected=new Set();
+ values.forEach((value,i)=>{
+   const weight=key=>(alternatives[key]?.[5]||profiles[key])[i];
+   const ranked=candidates.filter(key=>weight(key)>0).sort((a,b)=>weight(b)-weight(a));
+   ranked.slice(0,Math.ceil(ranked.length*value/5)).forEach(key=>selected.add(key));
+ });
+ const plan=base.filter(stop=>!candidates.includes(keyOf(stop)));
+ const insertBefore={'01-01':'cab','01-02':'END','01-06':'walking','01-07':'resort','01-11':'hawker','01-13':'wudao'};
+ let at=plan.findIndex(stop=>stop[0]===insertBefore[short(date)]);
+ if(short(date)==='01-02')at=plan.length-1;
+ if(short(date)==='01-09')at=plan.length-1;
+ if(short(date)==='01-12')at=1;
+ if(short(date)==='01-10')at=plan.findIndex(stop=>stop[0]==='china');
+ const extras=candidates.filter(key=>selected.has(key)).map(key=>{
+   const original=base.find(stop=>keyOf(stop)===key);
+   const entry=original?original.slice():[key,'',alternatives[key]?.[4]||notes[key]||'Дополнительная остановка.'];
+   entry[3]='По предпочтениям';
+   return entry;
+ });
+ plan.splice(at<0?plan.length:at,0,...extras);
  return plan;
+}
+function updateCount(day){
+ if(!day)return;
+ const extra=day[2].filter(stop=>stop[3]==='По предпочтениям');
+ const count=new Set(day[2].map(stop=>stop[0]).filter(Boolean)).size;
+ const limit=({'12-30':1,'01-02':1,'01-06':1,'01-10':1,'01-11':1,'01-13':0})[short(day[0])]??2;
+ const status=get('point-count');
+ status.textContent='Точек на карте: '+count+' · Дополнительных остановок: '+extra.length;
+ const warning=get('point-warning');
+ warning.hidden=extra.length<=limit;
+ warning.textContent=warning.hidden?'':'Слишком много остановок для этого дня. '+(limit?'Ориентир — до '+limit+' дополнительных.':'На пересадке время на выход в город нужно проверить после контроля.')+' Уменьшите ползунки.';
 }
 function controls(date){
  panel.hidden=!date;
  if(!date)return;
  panel.replaceChildren(node('h2','','Предпочтения дня'));
  if(!slots[short(date)]){panel.append(node('p','subtitle','День перелёта или переезда. Свободное окно для отдельной поездки не задано.')); }
+ const count=node('p','subtitle');count.id='point-count';count.setAttribute('aria-live','polite');
+ const warning=node('p','');warning.id='point-warning';warning.setAttribute('role','status');warning.hidden=true;
+ panel.append(count,warning);
  const values=settings[date]||[0,0,0,0];
  preferences.forEach((title,i)=>{
    const label=node('label',''),output=node('output','',values[i]),input=node('input');
