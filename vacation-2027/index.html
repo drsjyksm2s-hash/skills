@@ -18,7 +18,7 @@ nav{display:flex;gap:7px;overflow:auto;padding:4px 4px 10px;margin:0 -4px 11px;s
 @media(max-width:760px){header{display:block;margin-bottom:13px}.overview{margin-top:12px}.layout{grid-template-columns:minmax(0,1fr);gap:12px}#map{height:clamp(280px,49vh,470px)}.card{padding:13px}.routes-card{margin-top:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
-<style>#plan{margin-top:12px}.card label{display:block;margin:8px 0}.card input[type=range]{width:100%;display:block;accent-color:#155e51}.card details{margin-top:12px}</style><style>@media(min-width:761px){.panel{position:sticky;top:8px}#map{height:65vh}}@media(max-width:760px){header{display:flex;align-items:center;gap:8px}h1{font-size:1.65rem}header p{font-size:.82rem}.overview{margin-top:0;white-space:normal}#map{height:52vh;min-height:300px}}</style><style>#point-warning{background:#fff1cf;color:#653b00;border-left:4px solid #ab6809;padding:10px;border-radius:5px}</style></head>
+<style>#plan{margin-top:12px}.card label{display:block;margin:8px 0}.card input[type=range]{width:100%;display:block;accent-color:#155e51}.card details{margin-top:12px}</style><style>@media(min-width:761px){.panel{position:sticky;top:8px}#map{height:65vh}}@media(max-width:760px){header{display:flex;align-items:center;gap:8px}h1{font-size:1.65rem}header p{font-size:.82rem}.overview{margin-top:0;white-space:normal}#map{height:52vh;min-height:300px}}</style><style>#point-warning{background:#fff1cf;color:#653b00;border-left:4px solid #ab6809;padding:10px;border-radius:5px}</style><style>.ground-leg{padding:10px 0;border-top:1px solid var(--line);display:flex;gap:5px;flex-wrap:wrap}.ground-leg strong{flex-basis:100%}#ground-routes summary{padding:8px 0;cursor:pointer}</style></head>
 <body>
 <div class="wrap">
 <header><div><h1>Наш отпуск 2027</h1><p>29 декабря 2026 — 13 января 2027 · Время местное</p></div><button type="button" id="overview" class="overview" aria-pressed="true">Весь маршрут</button></header>
@@ -32,7 +32,7 @@ nav{display:flex;gap:7px;overflow:auto;padding:4px 4px 10px;margin:0 -4px 11px;s
 </section>
 <div>
 <section class="card" id="plan" aria-labelledby="day-title"><h2 id="day-title" aria-live="polite"></h2><p class="subtitle" id="day-subtitle"></p><div id="plan-list"></div></section>
-<section class="card routes-card" aria-labelledby="routes-title"><h2 id="routes-title">Прогулки в Google Maps</h2><p class="subtitle">10 января маршрут разбит на две части, чтобы сохранить все остановки на телефоне.</p><ul class="routes" id="walk-links"></ul></section>
+<section class="card routes-card"><h2>Как добраться</h2><p class="subtitle">Между известными точками дня. Выберите способ для просмотра пути в Google Maps. Для транспорта уточните дату, отправление и пересадки. Город или станция могут служить ориентиром, если адрес отеля неизвестен.</p><div id="ground-routes"></div></section><section class="card routes-card" aria-labelledby="routes-title"><h2 id="routes-title">Прогулки в Google Maps</h2><p class="subtitle">10 января маршрут разбит на две части, чтобы сохранить все остановки на телефоне.</p><ul class="routes" id="walk-links"></ul></section>
 </div>
 </div>
 </div>
@@ -427,6 +427,7 @@ function selectDay(date, moving=false) {
     });
   if(variant.length>1){const li=node('li');li.append(link('Маршрут по предпочтениям',direction(variant).replace('travelmode=walking','travelmode='+(['01-09','01-10','01-11','01-13'].includes(short(date))?'walking':'driving'))));items.unshift(li);}
   get('walk-links').replaceChildren(...items);
+  renderGroundRoutes(date);
 }
 for (const [date,title] of days) {
   const button = node('button','',labelDate(date));
@@ -511,6 +512,54 @@ function updateCount(day){
  warning.hidden=extra.length<=limit;
  warning.textContent=warning.hidden?'':'Слишком много остановок для этого дня. '+(limit?'Ориентир — до '+limit+' дополнительных.':'На пересадке время на выход в город нужно проверить после контроля.')+' Уменьшите ползунки.';
 }
+function renderGroundRoutes(date){
+ const container=get('ground-routes');
+ container.replaceChildren();
+ const anchors={
+  '12-30':[null,'bangkok'],'12-31':['bangkok',null],'01-02':['resort','resort'],
+  '01-04':['resort','resort'],'01-06':['resort',null],'01-07':['resort',null],
+  '01-10':['sentral',null],'01-12':['bangkok',null]
+ };
+ for(const current of date?[byDate.get(date)]:days){
+  const [stamp]=current, code=short(stamp);
+  const stops=hourlyPlan(current);
+  const section=node('section');
+  const edges=new Set();
+  function add(a,b,optional){
+   if(!a||!b||a===b||edges.has(a+'>'+b))return;
+   if(flightSegments.some(([,x,y])=>(a===x&&b===y)||(a===y&&b===x)))return;
+   const island=k=>['koh','tien','samae'].includes(k);
+   if(island(a)!==island(b))return;
+   edges.add(a+'>'+b);
+   const row=node('div','ground-leg');
+   row.append(node('strong','',places[a][0]+' → '+places[b][0]+(optional?' · вариант':'')));
+   for(const [mode,title] of [['driving','На машине'],['transit','Общественный транспорт']]){
+    row.append(link(title,googleLink('dir',{origin:places[a][3],destination:places[b][3],travelmode:mode})));
+   }
+   section.append(row);
+  }
+  let prev=anchors[code]?.[0],branch=null;
+  for(const [key,,note,status] of stops){
+   if(!key)continue;
+   if(code==='01-02'&&key==='bali'&&['tien','samae'].includes(prev))add(prev,'koh',false);
+   if(status&&status!=='По предпочтениям'&&code!=='01-13'){
+    add(prev,key,true);
+    branch=key;
+    continue;
+   }
+   add(prev,key,code==='01-13'&&Boolean(status||prev==='wudao'));
+   if(branch)add(branch,key,true);
+   branch=null;
+   prev=key;
+  }
+  add(prev,anchors[code]?.[1],false);
+  if(!edges.size)continue;
+  if(!date){const detail=node('details');detail.append(node('summary','',labelDate(stamp)+' · '+current[1]),section);container.append(detail);}
+  else container.append(section);
+ }
+ if(!container.children.length)container.append(node('p','note','Для этого дня в плане нет пары известных наземных остановок.'));
+}
+
 function hourlyPlan(day){
  const stops=suggested(day).map(stop=>stop.slice());
  if(!stops.length)stops.push([null,'','Свободный день. Добавьте варианты ползунками.','','Свободное время']);
